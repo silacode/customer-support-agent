@@ -1,0 +1,18 @@
+# Environment
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Data files
+data/
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

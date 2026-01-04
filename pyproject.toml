@@ -1,0 +1,16 @@
+[project]
+name = "customer-support-agent"
+version = "0.1.0"
+description = "CLI customer support agent with SQL and RAG tools"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "chromadb>=1.4.0",
+    "httpx>=0.28.1",
+    "openai>=2.14.0",
+    "python-dotenv>=1.2.1",
+    "rich>=14.2.0",
+]
+
+[project.scripts]
+support-agent = "main:main"
