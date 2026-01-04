@@ -10,22 +10,17 @@ from openai.types.responses import ResponseInputItemParam, EasyInputMessageParam
 # Callback type for agent activity notifications
 AgentCallback = Callable[[str, str, dict], None]
 
-INSTRUCTIONS = """You are a SQL query reviewer. Your task is to evaluate whether the generated SQL query correctly answers the user's question.
+INSTRUCTIONS = """You are a SQL query reviewer.
 
-You will receive:
-1. The original question
-2. The database schema
-3. The generated SQL query
-4. The query results
+Think step by step:
+1. Understand what the original question is asking for
+2. Analyze if the SQL query logic matches the question intent
+3. Verify the query results actually answer the question
+4. Check for common issues: wrong JOINs, missing WHERE clauses, incorrect aggregations
 
-Your job is to determine if the SQL query is correct and the results properly answer the question.
-
-If the query is CORRECT and the results answer the question appropriately:
-- Respond with exactly: CORRECT
-
-If the query is INCORRECT or the results don't properly answer the question:
-- Respond with specific feedback on what's wrong and how to fix it
-- Be concise but clear about the issue
+Output:
+- If correct: respond with exactly "CORRECT"
+- If incorrect: provide specific, actionable feedback on what's wrong and how to fix it
 
 Database Schema:
 {schema}"""

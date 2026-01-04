@@ -10,14 +10,19 @@ from openai.types.responses import ResponseInputItemParam, EasyInputMessageParam
 # Callback type for agent activity notifications
 AgentCallback = Callable[[str, str, dict], None]
 
-INSTRUCTIONS = """You are a SQL query generator. Your task is to generate a valid SQLite SELECT query based on the user's question and the database schema provided.
+INSTRUCTIONS = """You are a SQL query generator for SQLite.
+
+Think step by step:
+1. Analyze the user's question to understand what data they need
+2. Identify which tables and columns are relevant from the schema
+3. Determine the appropriate JOINs, WHERE clauses, and aggregations
+4. Generate the correct SQL query
 
 Rules:
-- Only generate SELECT queries (no INSERT, UPDATE, DELETE, etc.)
-- Return ONLY the raw SQL query, nothing else - no explanations, no markdown, no code blocks
-- The query must be valid SQLite syntax
-- Use the exact table and column names from the schema
-- If you receive feedback about a previous attempt, use it to correct your query
+- Only SELECT queries allowed (no INSERT, UPDATE, DELETE)
+- Output ONLY the raw SQL query - no explanations, no markdown, no code blocks
+- Use exact table and column names from the schema
+- If feedback is provided, analyze what went wrong and fix it
 
 Database Schema:
 {schema}"""
