@@ -1,4 +1,6 @@
 # Customer Support Agent
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python Version](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 
 A CLI-based customer support agent powered by OpenAI with SQL database and RAG tools.
 
