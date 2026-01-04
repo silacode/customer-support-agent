@@ -1,0 +1,41 @@
+# GitHub Actions workflow for testing the project
+name: Tests
+
+# Trigger on pushes and pull requests to main branch
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Test across multiple Python versions
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      # Download your code
+      - uses: actions/checkout@v4
+
+      # Install uv package manager with caching
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      # Set up Python version from matrix
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # Install dependencies (main + dev)
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      # Run tests
+      - name: Run tests
+        run: uv run pytest

@@ -11,6 +11,9 @@ from tools import TOOLS, handle_tool_call
 # Callback type for tool call notifications
 ToolCallCallback = Callable[[str, dict], None]
 
+# Callback type for agent activity notifications
+AgentCallback = Callable[[str, str, dict], None]
+
 
 INSTRUCTIONS = """You are a helpful customer support agent for an e-commerce company. 
 Your role is to assist customers with:
@@ -44,6 +47,7 @@ class SupportAgent:
         self,
         model: str | None = None,
         on_tool_call: ToolCallCallback | None = None,
+        on_agent_activity: AgentCallback | None = None,
     ):
         """
         Initialize the support agent.
@@ -52,11 +56,14 @@ class SupportAgent:
             model: OpenAI model to use. Defaults to OPENAI_MODEL env var or gpt-5-mini.
             on_tool_call: Optional callback invoked when a tool is called.
                           Receives (tool_name, arguments_dict).
+            on_agent_activity: Optional callback for sub-agent activity notifications.
+                               Receives (agent_name, action, details_dict).
         """
         self.client = AsyncOpenAI()
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
         self.conversation: list[ResponseInputItemParam] = []
         self.on_tool_call = on_tool_call
+        self.on_agent_activity = on_agent_activity
 
     async def chat(self, user_message: str) -> str:
         """
@@ -96,6 +103,7 @@ class SupportAgent:
                 instructions=INSTRUCTIONS,
                 input=self.conversation,
                 tools=TOOLS,
+                reasoning={"effort": "medium"},
             )
 
         # Add final response to conversation history
@@ -140,7 +148,7 @@ class SupportAgent:
         if self.on_tool_call:
             self.on_tool_call(name, args)
 
-        return await handle_tool_call(name, args)
+        return await handle_tool_call(name, args, self.on_agent_activity)
 
     def clear_history(self) -> None:
         """Clear conversation history."""
