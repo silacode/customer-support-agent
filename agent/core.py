@@ -3,8 +3,14 @@ import os
 import json
 from typing import Any, Callable, cast
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIError, APIConnectionError, RateLimitError
 from openai.types.responses import ResponseInputItemParam, EasyInputMessageParam
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from tools import TOOLS, handle_tool_call
 
@@ -13,6 +19,10 @@ ToolCallCallback = Callable[[str, dict], None]
 
 # Callback type for agent activity notifications
 AgentCallback = Callable[[str, str, dict], None]
+
+# Configuration
+MAX_CONVERSATION_ITEMS = 40  # ~20 turns (user + assistant)
+TOOL_TIMEOUT_SECONDS = 30.0
 
 
 INSTRUCTIONS = """You are a customer support agent for an e-commerce company.
@@ -75,14 +85,11 @@ class SupportAgent:
         user_msg: EasyInputMessageParam = {"role": "user", "content": user_message}
         self.conversation.append(user_msg)
 
-        # Call OpenAI Responses API
-        response = await self.client.responses.create(
-            model=self.model,
-            instructions=INSTRUCTIONS,
-            input=self.conversation,
-            tools=TOOLS,
-            reasoning={"effort": "medium"},
-        )
+        # Truncate conversation if too long to avoid token limits
+        self._truncate_conversation()
+
+        # Call OpenAI Responses API with retry
+        response = await self._call_api()
 
         # Process output items - handle function calls
         while self._has_function_calls(response.output):
@@ -95,18 +102,34 @@ class SupportAgent:
             )
             self.conversation.extend(tool_outputs)
 
-            response = await self.client.responses.create(
-                model=self.model,
-                instructions=INSTRUCTIONS,
-                input=self.conversation,
-                tools=TOOLS,
-                reasoning={"effort": "medium"},
-            )
+            response = await self._call_api()
 
         # Add final response to conversation history
         self.conversation.extend(cast(list[ResponseInputItemParam], response.output))
 
         return response.output_text
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((APIError, APIConnectionError, RateLimitError)),
+        reraise=True,
+    )
+    async def _call_api(self):
+        """Call OpenAI API with retry logic for transient failures."""
+        return await self.client.responses.create(
+            model=self.model,
+            instructions=INSTRUCTIONS,
+            input=self.conversation,
+            tools=TOOLS,
+            reasoning={"effort": "medium"},
+        )
+
+    def _truncate_conversation(self) -> None:
+        """Truncate conversation to prevent token overflow."""
+        if len(self.conversation) > MAX_CONVERSATION_ITEMS:
+            # Keep the most recent items
+            self.conversation = self.conversation[-MAX_CONVERSATION_ITEMS:]
 
     def _has_function_calls(self, output: list[Any]) -> bool:
         """Check if output contains any function calls."""
@@ -139,13 +162,19 @@ class SupportAgent:
         )
 
     async def _execute_tool(self, name: str, arguments: str) -> str:
-        """Execute a single tool call and return the result."""
+        """Execute a single tool call with timeout."""
         args = json.loads(arguments)
 
         if self.on_tool_call:
             self.on_tool_call(name, args)
 
-        return await handle_tool_call(name, args, self.on_agent_activity)
+        try:
+            return await asyncio.wait_for(
+                handle_tool_call(name, args, self.on_agent_activity),
+                timeout=TOOL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return f"Error: Tool '{name}' timed out after {TOOL_TIMEOUT_SECONDS}s"
 
     def clear_history(self) -> None:
         """Clear conversation history."""

@@ -1,8 +1,13 @@
 """Tests for the main SupportAgent."""
 
+import asyncio
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from openai import APIConnectionError
+from openai.types.responses import EasyInputMessageParam
 
 
 class MockOutputItem:
@@ -93,11 +98,10 @@ class TestSupportAgent:
                     "function_call",
                     call_id="call_123",
                     name="search_policies",
-                    arguments='{"question": "return policy"}'
+                    arguments='{"question": "return policy"}',
                 )
                 first_response = MockResponse(
-                    output_text="",
-                    output=[function_call_output]
+                    output_text="", output=[function_call_output]
                 )
 
                 # Second response is final message
@@ -135,9 +139,11 @@ class TestSupportAgent:
                     "function_call",
                     call_id="call_123",
                     name="search_policies",
-                    arguments='{"question": "test"}'
+                    arguments='{"question": "test"}',
                 )
-                first_response = MockResponse(output_text="", output=[function_call_output])
+                first_response = MockResponse(
+                    output_text="", output=[function_call_output]
+                )
                 final_response = MockResponse(output_text="Done")
 
                 mock_client.responses.create = AsyncMock(
@@ -167,13 +173,13 @@ class TestSupportAgent:
                     "function_call",
                     call_id="call_1",
                     name="search_policies",
-                    arguments='{"question": "returns"}'
+                    arguments='{"question": "returns"}',
                 )
                 call2 = MockOutputItem(
                     "function_call",
                     call_id="call_2",
                     name="query_orders_database",
-                    arguments='{"query": "SELECT 1"}'
+                    arguments='{"query": "SELECT 1"}',
                 )
                 first_response = MockResponse(output_text="", output=[call1, call2])
                 final_response = MockResponse(output_text="Here's the info")
@@ -242,3 +248,101 @@ class TestSupportAgent:
 
             assert agent._has_function_calls(output) is True
 
+    def test_truncate_conversation_when_over_limit(self):
+        """Should truncate conversation when over MAX_CONVERSATION_ITEMS."""
+        with patch("agent.core.AsyncOpenAI"):
+            from agent.core import SupportAgent, MAX_CONVERSATION_ITEMS
+
+            agent = SupportAgent()
+            # Add more items than the limit
+            for i in range(MAX_CONVERSATION_ITEMS + 10):
+                msg: EasyInputMessageParam = {"role": "user", "content": f"msg {i}"}
+                agent.conversation.append(msg)
+
+            agent._truncate_conversation()
+
+            assert len(agent.conversation) == MAX_CONVERSATION_ITEMS
+
+    def test_truncate_conversation_keeps_recent(self):
+        """Should keep most recent messages when truncating."""
+        with patch("agent.core.AsyncOpenAI"):
+            from agent.core import SupportAgent, MAX_CONVERSATION_ITEMS
+
+            agent = SupportAgent()
+            # Add numbered messages
+            for i in range(MAX_CONVERSATION_ITEMS + 5):
+                msg: EasyInputMessageParam = {"role": "user", "content": f"msg {i}"}
+                agent.conversation.append(msg)
+
+            agent._truncate_conversation()
+
+            # Should have kept the last MAX_CONVERSATION_ITEMS messages
+            first_item = cast(EasyInputMessageParam, agent.conversation[0])
+            last_item = cast(EasyInputMessageParam, agent.conversation[-1])
+            assert first_item.get("content") == "msg 5"
+            assert last_item.get("content") == f"msg {MAX_CONVERSATION_ITEMS + 4}"
+
+    def test_truncate_conversation_no_op_when_under_limit(self):
+        """Should not truncate when under limit."""
+        with patch("agent.core.AsyncOpenAI"):
+            from agent.core import SupportAgent
+
+            agent = SupportAgent()
+            msg1: EasyInputMessageParam = {"role": "user", "content": "msg 1"}
+            msg2: EasyInputMessageParam = {"role": "user", "content": "msg 2"}
+            agent.conversation.append(msg1)
+            agent.conversation.append(msg2)
+
+            agent._truncate_conversation()
+
+            assert len(agent.conversation) == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_timeout_returns_error(self):
+        """Should return error message when tool times out."""
+        with patch("agent.core.AsyncOpenAI") as mock_openai:
+            with patch("agent.core.handle_tool_call") as mock_handle:
+                with patch("agent.core.TOOL_TIMEOUT_SECONDS", 0.01):
+                    mock_client = MagicMock()
+                    mock_openai.return_value = mock_client
+
+                    # Make handle_tool_call hang
+                    async def slow_handler(*args, **kwargs):
+                        await asyncio.sleep(1)
+                        return "result"
+
+                    mock_handle.side_effect = slow_handler
+
+                    from agent.core import SupportAgent
+
+                    agent = SupportAgent()
+                    result = await agent._execute_tool(
+                        "search_policies", '{"question": "test"}'
+                    )
+
+                    assert "timed out" in result
+
+    @pytest.mark.asyncio
+    async def test_api_retry_on_transient_error(self):
+        """Should retry API calls on transient errors."""
+        with patch("agent.core.AsyncOpenAI") as mock_openai:
+            mock_client = MagicMock()
+            mock_openai.return_value = mock_client
+
+            # Fail twice, then succeed
+            mock_response = MockResponse(output_text="Success after retry")
+            mock_client.responses.create = AsyncMock(
+                side_effect=[
+                    APIConnectionError(request=MagicMock()),
+                    APIConnectionError(request=MagicMock()),
+                    mock_response,
+                ]
+            )
+
+            from agent.core import SupportAgent
+
+            agent = SupportAgent()
+            result = await agent.chat("Hello")
+
+            assert result == "Success after retry"
+            assert mock_client.responses.create.call_count == 3

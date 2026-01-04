@@ -11,6 +11,8 @@ A CLI-based customer support agent powered by OpenAI with SQL database and RAG t
 - **Policy Search**: RAG-powered search across company policies (returns, shipping, warranty)
 - **Conversation History**: Maintains context across multiple exchanges
 - **Multi-Agent SQL**: Uses generator and reviewer agents for accurate SQL queries
+- **Robustness**: Retry logic, conversation truncation, and tool timeouts
+- **CI/CD**: GitHub Actions with Python 3.11/3.12 matrix testing
 
 ## Architecture
 
@@ -86,6 +88,18 @@ Think step by step:
 ```
 
 This approach leverages the model's chain-of-thought capabilities for more accurate and explainable responses.
+
+### Parallel Tool Execution
+
+When the LLM returns multiple tool calls in a single response, they are executed **concurrently** using `asyncio.gather()` for better performance:
+
+```python
+# Multiple tools run in parallel
+results = await asyncio.gather(*[
+    self._execute_tool(item.name, item.arguments)
+    for item in output if item.type == "function_call"
+])
+```
 
 ### Component Overview
 
@@ -229,6 +243,16 @@ uv run pytest --cov=. --cov-report=html
 1. Add the handler function in `tools/handlers/`
 2. Add the OpenAI function schema in `tools/definitions.py`
 3. Register the handler in `tools/router.py`
+
+### Robustness Features
+
+The agent includes several reliability improvements:
+
+| Feature | Description |
+|---------|-------------|
+| **Retry Logic** | 3 attempts with exponential backoff for transient API failures |
+| **Conversation Truncation** | Keeps last 40 items (~20 turns) to prevent token overflow |
+| **Tool Timeout** | 30-second timeout prevents hanging on slow tool execution |
 
 ## Sample Data
 
